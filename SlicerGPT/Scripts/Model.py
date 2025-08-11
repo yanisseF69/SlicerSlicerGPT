@@ -3,6 +3,10 @@ from azure.ai.inference import ChatCompletionsClient
 from azure.ai.inference.models import SystemMessage, UserMessage
 from azure.core.credentials import AzureKeyCredential
 
+from queue import Queue
+import asyncio
+from threading import Thread
+
 import os
 os.environ["INFERENCE_API_TOKEN"] = ""
 
@@ -10,11 +14,11 @@ os.environ["INFERENCE_API_TOKEN"] = ""
 FAISS_DIR = "./SlicerFAISS"
 
 class Model:
-    def __init__(self, manager, model_name="unsloth/Qwen3-0.6B-GGUF", file_name="Qwen3-0.6B-Q8_0.gguf"):
+    def __init__(self, manager):
 
         self.llm = Llama.from_pretrained(
-            repo_id=model_name,
-            filename=file_name,
+            repo_id="unsloth/Qwen3-0.6B-GGUF",
+	        filename="Qwen3-0.6B-Q8_0.gguf",
             verbose=True,
             n_ctx=8196,
             n_gpu_layers=-1,
@@ -23,6 +27,9 @@ class Model:
         self.endpoint = "https://models.github.ai/inference"
         self.api_model = "openai/gpt-4.1"
         self.client = None
+
+        self.ollama_model = "qwen3:0.6b"
+        self.queue = Queue()
 
         self.manager = manager
         self.history = [{
@@ -116,6 +123,64 @@ class Model:
         self.history.append({"role": "assistant", "content": response})
 
         return response
+
+    async def _stream_response(self, user_input, mrml_scene, enable_thinking):
+        from ollama import AsyncClient
+        import ollama
+        # ollama.pull(self.model_name)
+        client = AsyncClient()
+        docs = self.manager.search(user_input, k=3)
+        think = self.think(enable_thinking) if "qwen3" in self.ollama_model.lower() else ""
+        context = (
+            "Context documents:\n"
+            + "\n---\n".join([doc.page_content for doc in docs]) + "\n\n"
+
+            "MRML Scene:\n"
+            + mrml_scene + "\n\n"
+
+            "Now, based on this context, the recent conversation, and your internal knowledge of 3D Slicer, "
+            "answer the user's question as a real 3D Slicer expert would. "
+            "Be technically accurate, easy to understand, and do not make up facts.\n\n"
+
+            f"User question: {user_input}"
+        )
+
+        messages = self.history + [{"role": "user", "content": context + think}]
+        self.history.append({"role": "user", "content": user_input})
+        response = ""
+        if enable_thinking:
+            sampling_options = {
+                "temperature": 0.6,
+                "top_p": 0.95,
+                "top_k": 20,
+                "min_p": 0.0,
+            }
+        else:
+            sampling_options = {
+                "temperature": 0.7,
+                "top_p": 0.8,
+                "top_k": 20,
+                "min_p": 0.0,
+            }
+        async for chunk in await client.chat(
+            model=self.ollama_model,
+            messages=messages,
+            stream=True,
+            options=sampling_options
+        ):
+            content = chunk["message"]["content"]
+            self.queue.put(content)
+            response = response + content
+        self.history.append({"role": "user", "content": response})
+        self.queue.put("[[DONE]]")
+
+    def start_streaming(self, user_input, mrml_scene, think_flag):
+        def run():
+            asyncio.run(self._stream_response(user_input, mrml_scene, think_flag))
+        Thread(target=run, daemon=True).start()
+
+    def read_chunk(self):
+        return self.queue.get()
 
 # if __name__ == "__main__":
 

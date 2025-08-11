@@ -5,6 +5,7 @@ import logging
 import sys
 import threading
 from fastapi import FastAPI, Request
+from fastapi.responses import StreamingResponse
 import uvicorn
 from pydantic import BaseModel
 from typing import Any, Optional
@@ -61,6 +62,20 @@ async def generate(message: Message):
     except Exception as e:
         logger.error(f"Error generating response: {str(e)}")
         raise
+
+@inferenceServer.post("/generateStream")
+async def generate(message: Message):
+    chatbot.start_streaming(message.content, message.mrml_scene, message.think)
+
+    async def event_stream():
+        while True:
+            chunk = chatbot.read_chunk()
+            logger.info("[[CHUNK]]" + chunk)
+            if chunk == "[[DONE]]":
+                break
+            yield chunk
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 @inferenceServer.post("/addKey")
 async def addKey(apiKey: ApiKey):

@@ -7,6 +7,8 @@ class AsyncRequest(qt.QObject):
     # Define signals that will be emitted when the request is finished
     requestFinished = qt.Signal(dict)
     requestFailed = qt.Signal(str)
+    requestChunk = qt.Signal(str)
+    chatbot = None
 
     def __init__(self):
         super().__init__()
@@ -18,8 +20,6 @@ class AsyncRequest(qt.QObject):
             url: request's URL
             json_data: JSON data to send
             
-        La réponse sera émise via le signal requestFinished.
-        Les erreurs seront émises via le signal requestFailed.
         """
         # Create a thread to execute the request
         thread = Thread(target=self._execute_request, args=(url, json_data))
@@ -39,7 +39,7 @@ class AsyncRequest(qt.QObject):
                     # Use moveToThread's thread to emit the signal safely
                     qt.QApplication.instance().postEvent(
                         self, 
-                        _CustomEvent(_CustomEvent.Success, data)
+                        _CustomEvent(_CustomEvent.Success, {"content": data})
                     )
                 except ValueError:
                     # Handle plain text response
@@ -62,6 +62,39 @@ class AsyncRequest(qt.QObject):
                 _CustomEvent(_CustomEvent.Error, error_msg)
             )
 
+    
+
+    def stream(self, url, json_data):
+        thread = Thread(target=self._execute_stream, args=(url, json_data))
+        thread.daemon = True
+        thread.start()
+
+    def _execute_stream(self, url, json_data):
+        import httpx
+        try:
+            with httpx.stream("POST", url, json=json_data, timeout=300.0) as response:
+                response.raise_for_status()
+                buffer = ""
+                for chunk in response.iter_text():
+                    if chunk:
+                        buffer += chunk
+                        # qt.QApplication.instance().postEvent(
+                        #     self,
+                        #     _CustomEvent(_CustomEvent.Chunk, chunk)
+                        # )
+
+            # qt.QApplication.instance().postEvent(
+            #     self,
+            #     _CustomEvent(_CustomEvent.Success, {"content": buffer})
+            # )
+
+        except Exception as e:
+            qt.QApplication.instance().postEvent(
+                self,
+                _CustomEvent(_CustomEvent.Error, f"Streaming error: {str(e)} {json_data}")
+            )
+
+
     # Override event method to handle our custom events
     def event(self, event):
         if event.type() == _CustomEvent.EventType:
@@ -69,19 +102,21 @@ class AsyncRequest(qt.QObject):
                 self.requestFinished.emit(event.data)
             elif event.event_kind == _CustomEvent.Error:
                 self.requestFailed.emit(event.data)
+            elif event.event_kind == _CustomEvent.Chunk:
+                self.requestChunk.emit(event.data)
             return True
         return qt.QObject.event(self, event)
 
 
 # Custom event class to safely pass data between threads
 class _CustomEvent(qt.QEvent):
-    # Define custom event type
     EventType = qt.QEvent.Type(qt.QEvent.registerEventType())
     
     # Event kinds
     Success = 0
     Error = 1
-    
+    Chunk = 2
+
     def __init__(self, event_kind, data):
         super().__init__(_CustomEvent.EventType)
         self.event_kind = event_kind
