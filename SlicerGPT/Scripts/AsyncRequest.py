@@ -39,7 +39,7 @@ class AsyncRequest(qt.QObject):
                     # Use moveToThread's thread to emit the signal safely
                     qt.QApplication.instance().postEvent(
                         self, 
-                        _CustomEvent(_CustomEvent.Success, data)
+                        _CustomEvent(_CustomEvent.Success, {"content": data})
                     )
                 except ValueError:
                     # Handle plain text response
