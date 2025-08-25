@@ -127,33 +127,49 @@ class Model:
     async def _stream_response(self, user_input, mrml_scene, enable_thinking):
         from ollama import AsyncClient
         import ollama
-        # ollama.pull(self.model_name)
         client = AsyncClient()
         docs = self.manager.search(user_input, k=3)
         think = self.think(enable_thinking) if "qwen3" in self.ollama_model.lower() else ""
         context = (
             "Context documents:\n"
             + "\n---\n".join([doc.page_content for doc in docs]) + "\n\n"
-
             "MRML Scene:\n"
             + mrml_scene + "\n\n"
-
             "Now, based on this context, the recent conversation, and your internal knowledge of 3D Slicer, "
             "answer the user's question as a real 3D Slicer expert would. "
             "Be technically accurate, easy to understand, and do not make up facts.\n\n"
-
             f"User question: {user_input}"
         )
 
         messages = self.history + [{"role": "user", "content": context + think}]
         self.history.append({"role": "user", "content": user_input})
         response = ""
-        async for chunk in await client.chat(model=self.ollama_model, messages=messages, stream=True):
-            content = chunk["message"]["content"]
-            self.queue.put(content)
-            response = response + content
+        try:
+            async for chunk in await client.chat(model=self.ollama_model, messages=messages, stream=True):
+                content = chunk["message"]["content"]
+                self.queue.put(content)
+                response += content
+        except Exception as e:
+            if "not found" in str(e).lower():
+                self.pull_model_if_needed()
+                async for chunk in await client.chat(model=self.ollama_model, messages=messages, stream=True):
+                    content = chunk["message"]["content"]
+                    self.queue.put(content)
+                    response += content
+            else:
+                self.queue.put(f"[ERROR] {str(e)}")
+                return
         self.history.append({"role": "user", "content": response})
         self.queue.put("[[DONE]]")
+
+    def pull_model_if_needed(self):
+        import ollama
+        try:
+            print(f"Trying to pull missing model: {self.ollama_model}")
+            ollama.pull(self.ollama_model)
+            print(f"Model {self.ollama_model} pulled successfully.")
+        except Exception as e:
+            print(f"Failed to pull model {self.ollama_model}: {e}")
 
     def start_streaming(self, user_input, mrml_scene, think_flag):
         def run():

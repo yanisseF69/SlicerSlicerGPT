@@ -95,7 +95,7 @@ class SlicerGPTWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         ScriptedLoadableModuleWidget.setup(self)
 
         if not self.areDependenciesSatisfied():
-            error_msg = "Llama.cpp, langchain, azure AI inference and transformers are required by this plugin.\n" \
+            error_msg = "Ollama, Llama.cpp, langchain, azure AI inference and transformers are required by this plugin.\n" \
                         "Please click on the Download button to download and install these dependencies.\n" \
                         "IMPORTANT : Llama.cpp will be compiled after its installation, please ensure you have a C/C++ compiler installed in your computer."
             self.layout.addWidget(qt.QLabel(error_msg))
@@ -219,7 +219,9 @@ class SlicerGPTWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         """Called when the user change the model used."""
         if button.text == "API Model":
             self.logic.setApi(True)
+            self.logic.setOllama(False)
         elif button.text == "Ollama Model":
+            self.logic.setApi(False)
             self.logic.setOllama(True)
         else:
             self.logic.setApi(False)
