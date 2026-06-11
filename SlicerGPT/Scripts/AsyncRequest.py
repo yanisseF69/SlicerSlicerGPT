@@ -36,7 +36,6 @@ class AsyncRequest(qt.QObject):
             if response.status_code == 200:
                 try:
                     data = response.json()
-                    # Use moveToThread's thread to emit the signal safely
                     qt.QApplication.instance().postEvent(
                         self, 
                         _CustomEvent(_CustomEvent.Success, {"content": data})
@@ -68,30 +67,51 @@ class AsyncRequest(qt.QObject):
         thread = Thread(target=self._execute_stream, args=(url, json_data))
         thread.daemon = True
         thread.start()
+        qt.QApplication.instance().processEvents()
 
     def _execute_stream(self, url, json_data):
         import httpx
+        import json
+
         try:
             with httpx.stream("POST", url, json=json_data, timeout=300.0) as response:
                 response.raise_for_status()
-                buffer = ""
-                for chunk in response.iter_text():
-                    if chunk:
-                        buffer += chunk
-                        # qt.QApplication.instance().postEvent(
-                        #     self,
-                        #     _CustomEvent(_CustomEvent.Chunk, chunk)
-                        # )
 
-            # qt.QApplication.instance().postEvent(
-            #     self,
-            #     _CustomEvent(_CustomEvent.Success, {"content": buffer})
-            # )
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+
+                    # print(line)
+
+                    line = line.decode("utf-8") if isinstance(line, bytes) else line
+
+                    if not line.startswith("data:"):
+                        continue
+
+                    data = line.replace("data:", "").strip()
+
+                    if data == "[DONE]":
+                        break
+
+                    try:
+                        token = json.loads(data)["token"]
+                    except Exception:
+                        continue
+
+                    qt.QApplication.instance().postEvent(
+                        self,
+                        _CustomEvent(_CustomEvent.Chunk, token)
+                    )
+
+            qt.QApplication.instance().postEvent(
+                self,
+                _CustomEvent(_CustomEvent.Success, {"content": "done"})
+            )
 
         except Exception as e:
             qt.QApplication.instance().postEvent(
                 self,
-                _CustomEvent(_CustomEvent.Error, f"Streaming error: {str(e)} {json_data}")
+                _CustomEvent(_CustomEvent.Error, f"Streaming error: {str(e)}")
             )
 
 
@@ -104,6 +124,7 @@ class AsyncRequest(qt.QObject):
                 self.requestFailed.emit(event.data)
             elif event.event_kind == _CustomEvent.Chunk:
                 self.requestChunk.emit(event.data)
+            qt.QApplication.instance().processEvents()
             return True
         return qt.QObject.event(self, event)
 

@@ -4,13 +4,14 @@ import time
 import logging
 import sys
 import threading
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import StreamingResponse
 import uvicorn
 from pydantic import BaseModel
 from typing import Any, Optional
 from Model import Model
 from VectorStoreManager import VectorStoreManager
+import json
 
 logging.basicConfig(level=logging.INFO, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -21,13 +22,12 @@ class Message(BaseModel):
     content: str
     mrml_scene: Optional[str] = None
     think: bool
-    use_api: bool
 
 class ThinkBool(BaseModel):
     think: bool
 
-class ApiKey(BaseModel):
-    key: str
+class ModelName(BaseModel):
+    model_name: str
 
 
 inferenceServer = FastAPI()
@@ -49,43 +49,28 @@ logger.info(f"Initialization complete in {time.time() - start_time:.2f} seconds"
 async def setThink(think: ThinkBool):
     chatbot.enable_thinking = think.think
 
-
-@inferenceServer.post("/generate")
-async def generate(message: Message):
-    logger.info("Starting generate function execution")
-    start_time = time.time()
+@inferenceServer.post("/pullModel")
+async def setModelName(model_name: ModelName):
+    chatbot.pull_model_if_needed(model_name.model_name)
+    logger.info(model_name.model_name + " pulled !")
     
-    try:
-        response = chatbot.generate_response(message.content, message.mrml_scene, message.think, message.use_api)
-        logger.info(f"generate function completed in {time.time() - start_time:.4f} seconds")
-        return response
-    except Exception as e:
-        logger.error(f"Error generating response: {str(e)}")
-        raise
-
 @inferenceServer.post("/generateStream")
 async def generate(message: Message):
-    chatbot.start_streaming(message.content, message.mrml_scene, message.think)
 
     async def event_stream():
-        while True:
-            chunk = chatbot.read_chunk()
-            logger.info("[[CHUNK]]" + chunk)
-            if chunk == "[[DONE]]":
-                break
-            yield chunk
+        for chunk in chatbot.stream_response(
+            message.content,
+            message.mrml_scene,
+            message.think
+        ):
+            yield f"data: {json.dumps({'token': chunk})}\n\n"
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+        yield "data: [DONE]\n\n"
 
-@inferenceServer.post("/addKey")
-async def addKey(apiKey: ApiKey):
-    logger.info("Adding API key")
-    try:
-        chatbot.initialize_azure_client(apiKey.key)
-        logger.info("API Key added.")
-    except Exception as e:
-        logger.error(f"Error generating response: {str(e)}")
-
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream"
+    )
 
 
 @inferenceServer.get("/health")
@@ -113,18 +98,18 @@ async def shutdown():
 
 def run_server():
     logger.info(f"Starting server on port 8081, PID: {server_pid}")
-    
-    config = uvicorn.Config(
-        app=inferenceServer, 
+    uvicorn.run(
+        "LocalServer:inferenceServer",
         host="127.0.0.1",
         port=8081,
         log_level="info",
         loop="asyncio",
-        workers=1
+        http="httptools",
+        ws="websockets",
+        reload=False,
+        access_log=False,
+        workers=1,
     )
-    
-    server = uvicorn.Server(config)
-    server.run()
 
 
 if __name__=="__main__":

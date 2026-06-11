@@ -16,12 +16,14 @@ class PythonDependencyChecker(object):
     try:
       import langchain_huggingface
       import langchain_community
-      import llama_cpp
       import faiss
       import fastapi
       import uvicorn
       import azure
       import ollama
+      import sentence_transformers
+      import httptools
+      import websockets
 
       return True
 
@@ -38,34 +40,8 @@ class PythonDependencyChecker(object):
       progressDialog = progressDialog or slicer.util.createProgressDialog(maximum=0)
       progressDialog.labelText = "Installing PyTorch"
       
-      import platform
 
-      if platform.system() == "Linux":
-          import shutil
-
-          gcc_path = shutil.which('gcc')
-          gxx_path = shutil.which('g++')
-          if not gcc_path:
-            gcc_path = shutil.which('clang')
-          if not gxx_path:
-              gxx_path = shutil.which('clang++')
-              
-          env_vars = {
-              'CC': gcc_path,
-              'CXX': gxx_path,
-              'CMAKE_C_COMPILER': gcc_path,
-              'CMAKE_CXX_COMPILER': gxx_path
-          }
-
-          for key, value in env_vars.items():
-              os.environ[key] = value
-
-
-      os.environ["CMAKE_ARGS"] = "-DGGML_BLAS=on"
-      os.environ["DGGML_BLAS_VENDOR"] = "OpenBLAS"
-      os.environ["FORCE_CMAKE"] = "1"
-
-      for dep in ["llama-cpp-python", "fastapi", "uvicorn", "langchain_huggingface", "langchain_community", "hf-xet", "faiss-cpu==1.7.4", "azure-ai-inference", "ollama"]:
+      for dep in ["fastapi", "uvicorn", "langchain_huggingface", "langchain_community", "hf-xet", "faiss-cpu", "azure-ai-inference", "ollama", "sentence-transformers", "httptools", "websockets"]:
         progressDialog.labelText = "Installing " + dep
         slicer.util.pip_install(dep)
     except Exception as e:

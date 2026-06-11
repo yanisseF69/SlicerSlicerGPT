@@ -35,6 +35,9 @@ You can find full installation instructions and platform-specific compiler requi
 👉 [https://github.com/abetlen/llama-cpp-python](https://github.com/abetlen/llama-cpp-python)
 For the moment, only the CPU version is compatible with this extension.
 
+In addition, SlicerGPT also requires [Ollama](https://ollama.com/) to be installed on your computer. Ollama is used to manage and run the local LLM models in a convenient way, and SlicerGPT connects to it as a backend. Make sure Ollama is installed and running in the background before using the extension.
+You can install it by following this link 👉 [https://ollama.com/download](https://ollama.com/download)
+
 Make sure your 3D Slicer's python version is 3.8 or higher.
 
 ## Installation & Usage
@@ -50,6 +53,7 @@ When launching **SlicerGPT for the first time**, the extension will:
 1. **Install Python dependencies**, including:
    - `llama-cpp-python`
    - `faiss-cpu==1.7.4`
+   - `ollama`
    - Other required libraries
 
 2. **Automatically restart 3D Slicer** once dependencies are installed.
@@ -72,13 +76,7 @@ After restarting, when you launch the extension again:
 
 Once the model is loaded, SlicerGPT will start a local web server using [Uvicorn](https://www.uvicorn.org/), which powers the backend communication between the chatbot and Slicer.
 
-/!\ **Please wait** until you see the following message in the Python console or log:
-
-```
-INFO: Uvicorn running on http://127.0.0.1:8081 (Press CTRL+C to quit)
-```
-
-This means the server is fully running, and the chatbot is ready to receive input.
+When the server is fully running, and the chatbot is ready to receive input.
 
 ---
 

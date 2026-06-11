@@ -95,11 +95,11 @@ class SlicerGPTWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         ScriptedLoadableModuleWidget.setup(self)
 
         if not self.areDependenciesSatisfied():
-            error_msg = "Ollama, Llama.cpp, langchain, azure AI inference and transformers are required by this plugin.\n" \
+            error_msg = _("Ollama, Llama.cpp, langchain, azure AI inference and transformers are required by this plugin.\n" \
                         "Please click on the Download button to download and install these dependencies.\n" \
-                        "IMPORTANT : Llama.cpp will be compiled after its installation, please ensure you have a C/C++ compiler installed in your computer."
+                        "IMPORTANT : Llama.cpp will be compiled after its installation, please ensure you have a C/C++ compiler installed in your computer.")
             self.layout.addWidget(qt.QLabel(error_msg))
-            downloadDependenciesButton = qt.QPushButton("Download dependencies and restart")
+            downloadDependenciesButton = qt.QPushButton(_("Download dependencies and restart"))
             downloadDependenciesButton.connect("clicked(bool)", self.downloadDependenciesAndRestart)
             downloadDependenciesButton.setCheckable(False)
             self.layout.addWidget(downloadDependenciesButton)
@@ -123,7 +123,7 @@ class SlicerGPTWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.logic = SlicerGPTLogic()
         self.loadingWidget = qt.QWidget()
         loadingLayout = qt.QVBoxLayout()
-        loadingLabel = qt.QLabel("Launching local AI engine... Please wait.")
+        loadingLabel = qt.QLabel(_("Launching local AI engine... Please wait."))
         loadingLabel.setAlignment(qt.Qt.AlignCenter)
         loadingLayout.addWidget(loadingLabel)
         self.loadingWidget.setLayout(loadingLayout)
@@ -150,11 +150,7 @@ class SlicerGPTWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.applyButton.connect("clicked(bool)", self.onApplyButton)
         self.ui.thinkBox.toggled.connect(self.onThinkBoxToggled)
 
-        self.ui.apiKeyButton.connect("clicked(bool)", self.onApiKeyInserted)
-
-        self.ui.baseButton.clicked.connect(lambda: self.onModelsBoxChanged(self.ui.baseButton))
-        self.ui.apiButton.clicked.connect(lambda: self.onModelsBoxChanged(self.ui.apiButton))
-        self.ui.ollamaButton.clicked.connect(lambda: self.onModelsBoxChanged(self.ui.ollamaButton))
+        self.ui.pullModelButton.connect("clicked(bool)", self.onModelPulled)
 
     def cleanup(self) -> None:
         """Called when the application closes and the module widget is destroyed."""
@@ -215,29 +211,15 @@ class SlicerGPTWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             else:
                 self.ui.applyButton.enabled = False
 
-    def onModelsBoxChanged(self, button) -> None:
-        """Called when the user change the model used."""
-        if button.text == "API Model":
-            self.logic.setApi(True)
-            self.logic.setOllama(False)
-        elif button.text == "Ollama Model":
-            self.logic.setApi(False)
-            self.logic.setOllama(True)
-        else:
-            self.logic.setApi(False)
-            self.logic.setOllama(False)
-
     def onThinkBoxToggled(self, checked):
         self.logic.setThinking(checked)
+
+    def onModelPulled(self):
+        self.logic.pullModel(self.ui.modelNameBox.currentText)
 
     def onServerReady(self):
         self.stack.setCurrentIndex(1)
         self.applyButtonEnabled = True
-
-    def onApiKeyInserted(self):
-        """Insert the API key to the logic."""
-        self.logic.addApiKey(self.ui.apiKeyText.text)
-        self.ui.apiKeyText.clear()
 
 
     def onApplyButton(self) -> None:
@@ -248,7 +230,6 @@ class SlicerGPTWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.ui.prompt.clear()
             message = {"role": "user", "content": text}
             self.ui.applyButton.enabled = False
-            self.ui.apiKeyButton.enabled = False
             self.applyButtonEnabled = False
             dialogue = self.logic.process(message)
             self.ui.conversation.setText(dialogue)
@@ -264,19 +245,28 @@ class SlicerGPTWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.conversation.ensureCursorVisible()
 
         
-        self.ui.apiKeyButton.enabled = True
+        self.ui.pullModelButton.enabled = True
         self.applyButtonEnabled = True
 
+        self.ui.conversation.repaint()
+        self.ui.conversation.update()
+
     def updateConversationLive(self, partial_text):
-        html = markdown_to_html(partial_text)
+
         formatted = (
-            f'<div style="text-align:right; margin: 5px;"><span style="color:blue; font-weight:bold;">You:</span><br>'
+            f'<div style="text-align:right; margin: 5px;">'
+            f'<span style="color:blue; font-weight:bold;">You:</span><br>'
             f'{markdown_to_html(self.logic.dialogue[-2]["content"])}</div>'
-            f'<div style="text-align:left; margin: 5px;"><span style="color:red; font-weight:bold;">SlicerGPT:</span><br>{html}</div>'
+            f'<div style="text-align:left; margin: 5px;">'
+            f'<span style="color:red; font-weight:bold;">SlicerGPT:</span><br>'
+            f'{markdown_to_html(partial_text)}</div>'
         )
+
         self.ui.conversation.setText(formatted)
         self.ui.conversation.moveCursor(qt.QTextCursor.End)
         self.ui.conversation.ensureCursorVisible()
+
+        self.ui.conversation.repaint()
     
     @staticmethod
     def areDependenciesSatisfied():
@@ -321,16 +311,13 @@ class SlicerGPTLogic(ScriptedLoadableModuleLogic):
         ScriptedLoadableModuleLogic.__init__(self)
         self.dialogue = []
         self.streamingBuffer = ""
-        self.stderr_buffer = ""
-        # self.chunkTimer = qt.QTimer()
-        # self.chunkTimer.setInterval(10)  # 100 ms
-        # self.chunkTimer.timeout.connect(self.read_next_chunk)
+
         self.proc = qt.QProcess()
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         if base_dir not in sys.path:
             sys.path.append(base_dir)
         server_path = os.path.join(base_dir, "SlicerGPT", "Scripts", "LocalServer.py")
-        self.proc.setProgram("PythonSlicer")
+        self.proc.setProgram("python-real")
         self.proc.setArguments([server_path])
 
         self.proc.readyReadStandardOutput.connect(self.handle_stdout)
@@ -345,36 +332,37 @@ class SlicerGPTLogic(ScriptedLoadableModuleLogic):
         self.async_request.requestFailed.connect(self.handleError)
         self.async_request.requestChunk.connect(self.handleChunk)
 
+        self.event_timer = qt.QTimer()
+        self.event_timer.setInterval(25)
+        self.event_timer.timeout.connect(self.force_event_processing)
+        self.event_timer.start()
+
         self.widget = None
         self.serverReady = False
 
         self.think = False
-        self.useApi = False
-        self.useOllama = False
+
+    def force_event_processing(self):
+            """Force processing treatment on Qt and Slicer events."""
+            qt.QApplication.instance().processEvents()
+            if hasattr(slicer, 'app') and slicer.app:
+                slicer.app.processEvents()
+            if self.widget and hasattr(self.widget, 'ui'):
+                try:
+                    self.widget.ui.conversation.repaint()
+                except:
+                    pass
 
     def handleChunk(self, chunk):
-        self.streamingBuffer += chunk
-        # print(self.streamingBuffer)
+        self.dialogue[-1]["content"] += chunk
+
         if self.widget:
-            self.widget.updateConversationLive(self.streamingBuffer)
+            self.widget.updateConversation(
+                self.formatDialogue()
+            )
 
-    # def read_next_chunk(self):
-    #     try:
-    #         chunk = self.model.read_chunk()
-    #         if chunk == "[[DONE]]":
-    #             self.chunkTimer.stop()
-    #             self.dialogue.pop()  # remove "Generating response..."
-    #             self.dialogue.append({"role": "assistant", "content": self.streamingBuffer})
-    #             if self.widget:
-    #                 self.widget.updateConversation(self.formatDialogue())
-    #         else:
-    #             self.streamingBuffer += chunk
-    #             if self.widget:
-    #                 self.widget.updateConversationLive(self.streamingBuffer)
-    #     except Exception as e:
-    #         print(f"[ERROR] Reading chunk: {e}")
-
-
+        qt.QApplication.instance().processEvents()
+        slicer.app.processEvents()
         
     def getParameterNode(self):
         return SlicerGPTParameterNode(super().getParameterNode())
@@ -400,12 +388,12 @@ class SlicerGPTLogic(ScriptedLoadableModuleLogic):
     def handle_stderr(self):
         raw = self.proc.readAllStandardError().data()
         error = raw.decode(errors="replace")
-        if "[[CHUNK]]" in error:
-            if "[[DONE]]" in error:
-                self.handleResponse({"content": self.streamingBuffer.strip()})
-                return
-            chunk = error.split("[[CHUNK]]")[-1]
-            self.handleChunk(chunk[:-1].strip("\r"))
+        # if "[[CHUNK]]" in error:
+        #     if "[[DONE]]" in error:
+        #         self.handleResponse({"content": self.streamingBuffer.strip()})
+        #         return
+        #     chunk = error.split("[[CHUNK]]")[-1]
+        #     self.handleChunk(chunk[:-1].strip("\r"))
         print("[STDERR]", error)
         if not self.serverReady:
             self.checkServerInitialised(error)
@@ -414,13 +402,17 @@ class SlicerGPTLogic(ScriptedLoadableModuleLogic):
         """
         Handle the received response during the async request
         """
-        print(response_data)
+
+        if response_data['content'] == 'done':
+            return
 
         self.dialogue.pop()
         self.dialogue.append({"role": "assistant", "content": response_data['content']})
 
         if self.widget:
             self.widget.updateConversation(self.formatDialogue())
+            qt.QApplication.instance().processEvents()
+            slicer.app.processEvents()
             
     def handleError(self, error_message):
         """
@@ -438,20 +430,14 @@ class SlicerGPTLogic(ScriptedLoadableModuleLogic):
         """
         self.think = think
 
-    def setApi(self, useApi):
-        self.useApi = useApi
-    
-    def setOllama(self, useOllama):
-        self.useOllama = useOllama
-
     def checkStatus(self, data):
         if data.get("status") == "ok":
             return True
         return False
     
-    def addApiKey(self, key):
-        apiKey = {"key": key}
-        requests.post("http://127.0.0.1:8081/addKey", json=apiKey)
+    def pullModel(self, model_name):
+        modelName = {"model_name": model_name}
+        requests.post("http://127.0.0.1:8081/pullModel", json=modelName)
     
     def formatDialogue(self) -> str:
         """
@@ -477,19 +463,18 @@ class SlicerGPTLogic(ScriptedLoadableModuleLogic):
         logging.info("Processing started")
 
         self.dialogue.append(message)
-        temp_message = {"role": "assistant", "content": "Generating response..."}
-        self.dialogue.append(temp_message)
+        self.dialogue.append({"role": "assistant", "content": ""})
         
         message["mrml_scene"] = extract_mrml_scene_as_text()
         message["think"] = self.think
-        message["use_api"] = self.useApi
         
         formatted_dialogue = self.formatDialogue()
         self.streamingBuffer = ""
-        if self.useOllama:
-            self.async_request.stream("http://127.0.0.1:8081/generateStream", message)
-        else:
-            self.async_request.post("http://127.0.0.1:8081/generate", message)
+        self.async_request.stream("http://127.0.0.1:8081/generateStream", message)
+        
+        qt.QApplication.instance().processEvents()
+
+        self.widget.applyButtonEnabled = True
         
         return formatted_dialogue
     
